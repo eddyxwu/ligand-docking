@@ -1,0 +1,206 @@
+diff --git a/lagra-core/src/bin/renderer/render/mod.rs b/lagra-core/src/bin/renderer/render/mod.rs
+index 3f0a68a..f275bf5 100644
+--- a/lagra-core/src/bin/renderer/render/mod.rs
++++ b/lagra-core/src/bin/renderer/render/mod.rs
+@@ -254,6 +254,10 @@ pub struct Renderer {
+     pub post_frame: u64,
+     /// <reason>Reusable scratch buffer for post-processing (avoids per-frame allocation)</reason>
+     post_scratch: Vec<u32>,
++    /// <reason>Scene title overlay (from scene display.labels.title; None = no title)</reason>
++    scene_title: Option<String>,
++    /// <reason>3D-anchored text annotations (from scene display.labels.annotations)</reason>
++    scene_annotations: Vec<(String, Vec3)>,
+ }
+ 
+ impl Renderer {
+@@ -280,9 +284,17 @@ impl Renderer {
+             length_unit: "fm".to_string(),
+             post_frame: 0,
+             post_scratch: vec![COLOR_BACKGROUND; WINDOW_WIDTH * WINDOW_HEIGHT],
++            scene_title: None,
++            scene_annotations: Vec::new(),
+         }
+     }
+-    
++
++    /// <reason>Set scene title + 3D annotations from scene display settings</reason>
++    pub fn set_scene_labels(&mut self, title: Option<String>, annotations: Vec<(String, Vec3)>) {
++        self.scene_title = title;
++        self.scene_annotations = annotations;
++    }
++
+     /// <reason>Set length unit from scene display settings</reason>
+     pub fn set_length_unit(&mut self, unit: &str) {
+         self.length_unit = unit.to_uppercase();
+@@ -875,6 +887,12 @@ impl Renderer {
+             self.render_force_overlay(w, sw, sh);
+             profiler::end();
+         }
++
++        // <reason>Scene title + 3D annotations (from scene display.labels)</reason>
++        // <reason>Hidden in photo mode (cinematic frames carry no text)</reason>
++        if !self.is_photo_mode() {
++            self.render_scene_labels(sw, sh);
++        }
+         
+         // Particle labels (always readable)
+         if show_labels {
+@@ -1407,6 +1425,32 @@ impl Renderer {
+     
+     /// <reason>Render grid planes emanating from XYZ axes with femtometer markings</reason>
+     /// <reason>Uses static grid extents computed once per scene load</reason>
++    /// <reason>Draw the scene title (top center) and 3D-anchored annotations.</reason>
++    /// <reason>Makes the scene self-identifying: a paused frame still says what it shows.</reason>
++    fn render_scene_labels(&mut self, sw: f64, sh: f64) {
++        const CHAR_W: usize = 8;  // <reason>FONT_WIDTH + 1 spacing used by text()</reason>
++
++        if let Some(title) = self.scene_title.clone() {
++            let tw = title.len() * CHAR_W;
++            let tx = ((sw as usize).saturating_sub(tw)) / 2;
++            let ty = 18usize;
++            self.fill_rect_panel(tx.saturating_sub(8), ty - 6, tw + 16, 20, 0xE0101720);
++            self.text(tx, ty, &title, 0xFFE8EEF4);
++        }
++
++        for (label, pos) in self.scene_annotations.clone() {
++            if let Some((ax, ay, _z)) = self.cam.project(pos, sw, sh) {
++                if ax < 0 || ay < 0 || ax >= sw as i32 || ay >= sh as i32 { continue; }
++                let (lx, ly) = (ax as usize + 10, ay as usize);
++                let lw = label.len() * CHAR_W;
++                // <reason>Leader dot at the anchor, text offset right with dark backing</reason>
++                self.circle(ax, ay, 1.0, 2, 0xFFCBD6E2);
++                self.fill_rect_panel(lx.saturating_sub(3), ly.saturating_sub(4), lw + 6, 16, 0xD0101720);
++                self.text(lx, ly, &label, 0xFFB9C6D6);
++            }
++        }
++    }
++
+     fn render_grid_planes(&mut self, _w: &World, sw: f64, sh: f64) {
+         use super::constants::{GRID_LINE_SPACING_FM, GRID_LINE_ALPHA};
+         
+diff --git a/lagra-core/src/bin/renderer/render/particles.rs b/lagra-core/src/bin/renderer/render/particles.rs
+index 564c608..5e558e3 100644
+--- a/lagra-core/src/bin/renderer/render/particles.rs
++++ b/lagra-core/src/bin/renderer/render/particles.rs
+@@ -124,7 +124,9 @@ impl Renderer {
+                     let r = raw_radius
+                         .max(MIN_VISUAL_CLOUD_RADIUS as f64)
+                         .min(MAX_VISUAL_CLOUD_RADIUS as f64) as i32;
+-                    self.circle(sx, sy, z, r, w.colors[i]);
++                    // <reason>Shaded sphere (not flat circle): classical particles get the</reason>
++                    // <reason>molecular space-fill look with the engine's soft visual language</reason>
++                    self.render_classical_sphere(sx, sy, z, r, w.colors[i]);
+                 }
+             }
+             profiler::end();
+@@ -694,7 +696,109 @@ impl Renderer {
+         
+         self.buf[idx] = 0xFF000000 | (new_r.min(rgb_max) << 16) | (new_g.min(rgb_max) << 8) | new_b.min(rgb_max);
+     }
+-    
++
++    /// <reason>Alpha blend (lerp) over background - for antialiased opaque edges</reason>
++    fn blend_alpha_safe(&mut self, x: i32, y: i32, r: u32, g: u32, b: u32, alpha: f64) {
++        let sw = self.scene_width_px() as i32;
++        let sh = self.h as i32;
++        if x < 0 || x >= sw || y < 0 || y >= sh { return; }
++        let idx = y as usize * self.w + x as usize;
++        if idx >= self.buf.len() { return; }
++
++        let bg = self.buf[idx];
++        let a = alpha.clamp(0.0, 1.0);
++        let ia = 1.0 - a;
++        let bg_r = ((bg >> 16) & 0xFF) as f64;
++        let bg_g = ((bg >> 8) & 0xFF) as f64;
++        let bg_b = (bg & 0xFF) as f64;
++        let new_r = (r as f64 * a + bg_r * ia) as u32;
++        let new_g = (g as f64 * a + bg_g * ia) as u32;
++        let new_b = (b as f64 * a + bg_b * ia) as u32;
++        self.buf[idx] = 0xFF000000 | (new_r.min(255) << 16) | (new_g.min(255) << 8) | new_b.min(255);
++    }
++
++    /// <reason>Shaded classical sphere for coarse-grained/classical particles (has_qdesic = false)</reason>
++    /// <reason>Physically honest: no quantum probability cloud is drawn, because for heavy</reason>
++    /// <reason>classical objects λ_deBroglie = ħ/p ≈ 0 - there is no visible uncertainty.</reason>
++    /// <reason>Instead: solid occluding sphere (molecular space-fill representation) that</reason>
++    /// <reason>shares the engine's visual language - Lambert shading, soft specular core,</reason>
++    /// <reason>antialiased edge, subtle additive halo, and circle()'s depth dimming.</reason>
++    fn render_classical_sphere(&mut self, cx: i32, cy: i32, z: f64, radius: i32, color: u32) {
++        let sw = self.scene_width_px() as i32;
++        let sh = self.h as i32;
++        let r_f = radius as f64;
++        if r_f < 1.0 { return; }
++
++        // <reason>Gentler depth dimming than circle(): classical scenes sit at larger camera</reason>
++        // <reason>distances than fm-scale quantum scenes, so circle()'s 0.15/px slope pins</reason>
++        // <reason>everything to its 0.3 floor. Slope 0.04 + floor 0.55 keeps depth cueing</reason>
++        // <reason>while matching the brightness of the engine's cloud-rendered scenes.</reason>
++        let depth_bright = (1.0 - (z - 1.0).max(0.0) * 0.04).max(0.55);
++
++        let cr = ((color >> 16) & 0xFF) as f64;
++        let cg = ((color >> 8) & 0xFF) as f64;
++        let cb = (color & 0xFF) as f64;
++
++        // <reason>Fixed light: upper-left, toward viewer (matches the engine's soft look)</reason>
++        const LX: f64 = -0.42;
++        const LY: f64 = -0.57;
++        const LZ: f64 = 0.71;
++        // <reason>Half-vector of light + view (0,0,1) for Blinn specular, precomputed</reason>
++        const HX: f64 = -0.24;
++        const HY: f64 = -0.33;
++        const HZ: f64 = 0.91;
++
++        // <reason>Additive halo just outside the edge: ties into the cloud glow language</reason>
++        let halo_ext = (r_f * 0.30).clamp(2.0, 9.0);
++        let r_ext = radius + halo_ext.ceil() as i32 + 1;
++
++        for dy in -r_ext..=r_ext {
++            let py = cy + dy;
++            if py < 0 || py >= sh { continue; }
++            for dx in -r_ext..=r_ext {
++                let px = cx + dx;
++                if px < 0 || px >= sw { continue; }
++                let d = ((dx * dx + dy * dy) as f64).sqrt();
++
++                if d <= r_f {
++                    // <reason>Implied sphere normal: n_z = sqrt(1 - (d/r)²)</reason>
++                    let nx = dx as f64 / r_f;
++                    let ny = dy as f64 / r_f;
++                    let nz = (1.0 - (nx * nx + ny * ny)).max(0.0).sqrt();
++
++                    // <reason>Lambert diffuse + ambient floor (keeps dark side readable)</reason>
++                    let lambert = (nx * LX + ny * LY + nz * LZ).max(0.0);
++                    let shade = 0.38 + 0.62 * lambert;
++
++                    // <reason>Soft Blinn specular: the white-hot center echo of the cloud cores</reason>
++                    let spec = (nx * HX + ny * HY + nz * HZ).max(0.0).powi(14) * 0.40;
++
++                    let rr = ((cr * shade + 255.0 * spec) * depth_bright).min(255.0) as u32;
++                    let gg = ((cg * shade + 255.0 * spec) * depth_bright).min(255.0) as u32;
++                    let bb = ((cb * shade + 255.0 * spec) * depth_bright).min(255.0) as u32;
++
++                    // <reason>Antialiased rim: soft opaque edge over ~1.5px, like the clouds</reason>
++                    let edge = ((r_f - d) / 1.5).min(1.0);
++                    if edge >= 1.0 {
++                        let idx = py as usize * self.w + px as usize;
++                        if idx < self.buf.len() {
++                            self.buf[idx] = 0xFF000000 | (rr << 16) | (gg << 8) | bb;
++                        }
++                    } else {
++                        self.blend_alpha_safe(px, py, rr, gg, bb, edge);
++                    }
++                } else {
++                    // <reason>Halo: quadratic-falloff additive glow outside the edge</reason>
++                    let t = (d - r_f) / halo_ext;
++                    if t < 1.0 {
++                        let glow = (1.0 - t) * (1.0 - t) * 0.16 * depth_bright;
++                        self.blend_additive_safe(px, py, cr as u32, cg as u32, cb as u32, glow);
++                    }
++                }
++            }
++        }
++    }
++
+     /// <reason>Render particle trail showing Q-desic worldline</reason>
+     fn render_particle_trail(&mut self, w: &World, i: usize, sw: f64, sh: f64) {
+         let base_rgb = w.colors[i] & 0x00FFFFFF;

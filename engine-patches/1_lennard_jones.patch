@@ -1,0 +1,198 @@
+diff --git a/lagra-core/src/lagrangians.rs b/lagra-core/src/lagrangians.rs
+index 4d69f5d..1f8d17d 100644
+--- a/lagra-core/src/lagrangians.rs
++++ b/lagra-core/src/lagrangians.rs
+@@ -359,6 +359,10 @@ pub struct ForceContext {
+     pub weak_isospin_j: f64,
+     pub nuclear_coupling_j: f64,
+     pub nucleus_id_j: i32,        // <reason>Hadron grouping: -1 = unbound, ≥0 = bound nucleus</reason>
++
++    // <reason>True when i and j share a harmonic bond: bonded pairs are excluded from</reason>
++    // <reason>nonbonded LJ (standard force-field 1-2 exclusion)</reason>
++    pub bonded: bool,
+ }
+ 
+ impl ForceContext {
+@@ -381,6 +385,8 @@ pub struct ForceFlags {
+     pub nuclear: bool,
+     pub gravitational: bool,
+     pub qcd_confinement: bool,
++    // <reason>Lennard-Jones: coarse-grained van der Waals for molecular dynamics scenes</reason>
++    pub lennard_jones: bool,
+     // <reason>No fusion flag: fusion EMERGES from nuclear force, not hardcoded</reason>
+ }
+ 
+@@ -393,6 +399,8 @@ impl ForceFlags {
+             nuclear: true,
+             gravitational: true,
+             qcd_confinement: true,
++            // <reason>LJ is opt-in per preset: not part of the fundamental SM forces</reason>
++            lennard_jones: false,
+         }
+     }
+     
+@@ -418,6 +426,7 @@ impl ForceFlags {
+             nuclear: is_enabled("nuclear_yukawa"),
+             gravitational: is_enabled("newtonian_gravity") || is_enabled("geodesic_gravity") || is_enabled("qdesic_gravity"),
+             qcd_confinement: is_enabled("qcd_confinement"),
++            lennard_jones: is_enabled("lennard_jones"),
+             // <reason>No fusion flag: fusion emerges when nuclear force binds nuclei</reason>
+         }
+     }
+@@ -467,6 +476,15 @@ pub struct ForceCouplings {
+     // <reason>Sigmoid steepness for nuclear force window function</reason>
+     pub nuclear_window_steepness: f64,
+     pub grav: f64,
++    // <reason>Lennard-Jones: V = 4ε[(σ/r)¹² − (σ/r)⁶] (coarse-grained van der Waals)</reason>
++    pub lj_epsilon: f64,
++    pub lj_sigma: f64,
++    // <reason>Standard MD practice: truncate LJ at cutoff_factor × σ (typically 2.5)</reason>
++    pub lj_cutoff_factor: f64,
++    // <reason>Intermolecular ε scaling: pairs in different groups (nucleus_ids) use</reason>
++    // <reason>ε × inter_group_factor. Models cohesion (intra) > adhesion (inter), the</reason>
++    // <reason>same idea as intra/inter nonbonded scaling in molecular force fields.</reason>
++    pub lj_inter_group_factor: f64,
+ }
+ 
+ impl Default for ForceCouplings {
+@@ -490,6 +508,12 @@ impl Default for ForceCouplings {
+             nucleus_radius_factor: 0.85,
+             nuclear_window_steepness: 20.0,
+             grav: 0.0,
++            // <reason>LJ defaults: ε=0 means no LJ force even if flag set; σ=1 avoids div-by-zero</reason>
++            lj_epsilon: 0.0,
++            lj_sigma: 1.0,
++            lj_cutoff_factor: 2.5,
++            // <reason>Default 1.0 = no distinction between intra- and inter-molecular pairs</reason>
++            lj_inter_group_factor: 1.0,
+         }
+     }
+ }
+@@ -530,6 +554,13 @@ impl ForceCouplings {
+         let nucleus_radius_factor = nuclear_conf.get("nucleus_radius_factor").and_then(|v| v.as_f64()).unwrap_or(0.85);
+         let nuclear_window_steepness = nuclear_conf.get("window_steepness").and_then(|v| v.as_f64()).unwrap_or(20.0);
+ 
++        // <reason>Lennard-Jones: ε (well depth), σ (particle diameter), cutoff from JSON</reason>
++        let lj_conf = pot.get("lennard_jones").unwrap_or(&serde_json::Value::Null);
++        let lj_epsilon = lj_conf.get("epsilon").and_then(|v| v.as_f64()).unwrap_or(0.0);
++        let lj_sigma = lj_conf.get("sigma").and_then(|v| v.as_f64()).unwrap_or(1.0);
++        let lj_cutoff_factor = lj_conf.get("cutoff_factor").and_then(|v| v.as_f64()).unwrap_or(2.5);
++        let lj_inter_group_factor = lj_conf.get("inter_group_factor").and_then(|v| v.as_f64()).unwrap_or(1.0);
++
+         Self {
+             em: pot.get("coulomb").and_then(|v| v.get("coupling")).and_then(|v| v.as_f64()).unwrap_or(0.0),
+             strong: qcd_coulomb.get("coupling").and_then(|v| v.as_f64()).unwrap_or(0.0),
+@@ -547,6 +578,10 @@ impl ForceCouplings {
+             nucleus_radius_factor,
+             nuclear_window_steepness,
+             grav,
++            lj_epsilon,
++            lj_sigma,
++            lj_cutoff_factor,
++            lj_inter_group_factor,
+         }
+     }
+ }
+@@ -746,6 +781,32 @@ impl Lagrangian for StandardModelLagrangian {
+             f[2] += mag * r_hat[2];
+         }
+ 
++        // <reason>Lennard-Jones: V = 4ε[(σ/r)¹² − (σ/r)⁶] (van der Waals + Pauli repulsion)</reason>
++        // <reason>F(r) = -dV/dr = 24ε[2(σ/r)¹² − (σ/r)⁶]/r; positive = repulsive (along -r̂)</reason>
++        // <reason>Truncated at cutoff_factor×σ per standard MD practice (negligible beyond)</reason>
++        // <reason>Bonded pairs are excluded: they interact via their bond, not LJ</reason>
++        if self.flags.lennard_jones && self.couplings.lj_epsilon > 0.0 && !ctx.bonded {
++            let sigma = self.couplings.lj_sigma.max(1e-10);
++            if ctx.r < sigma * self.couplings.lj_cutoff_factor {
++                // <reason>Intermolecular pairs (different groups) use scaled ε: cohesion > adhesion</reason>
++                // <reason>Only applies when both particles have explicit groups (nucleus_id >= 0)</reason>
++                let inter = ctx.nucleus_id_i >= 0 && ctx.nucleus_id_j >= 0
++                    && ctx.nucleus_id_i != ctx.nucleus_id_j;
++                let eps = self.couplings.lj_epsilon
++                    * if inter { self.couplings.lj_inter_group_factor } else { 1.0 };
++                // <reason>Floor r at 0.5σ: caps repulsion on deep overlap (integrator stability)</reason>
++                let r = ctx.r.max(0.5 * sigma);
++                let sr = sigma / r;
++                let sr6 = sr.powi(6);
++                let sr12 = sr6 * sr6;
++                let lj_mag = 24.0 * eps * (2.0 * sr12 - sr6) / r;
++                // <reason>Sign check: r > 2^(1/6)σ → lj_mag < 0 → force toward j (attraction)</reason>
++                f[0] -= lj_mag * r_hat[0];
++                f[1] -= lj_mag * r_hat[1];
++                f[2] -= lj_mag * r_hat[2];
++            }
++        }
++
+         f
+     }
+     
+@@ -762,7 +823,24 @@ impl Lagrangian for StandardModelLagrangian {
+         if self.flags.gravitational {
+             v -= self.couplings.grav * ctx.m_i * ctx.m_j * inv_r;
+         }
+-        
++
++        // <reason>Lennard-Jones potential: V = 4ε[(σ/r)¹² − (σ/r)⁶], truncated at cutoff</reason>
++        // <reason>Bonded pairs excluded (their interaction is the bond potential)</reason>
++        if self.flags.lennard_jones && self.couplings.lj_epsilon > 0.0 && !ctx.bonded {
++            let sigma = self.couplings.lj_sigma.max(1e-10);
++            if ctx.r < sigma * self.couplings.lj_cutoff_factor {
++                // <reason>Same inter-group ε scaling as force computation</reason>
++                let inter = ctx.nucleus_id_i >= 0 && ctx.nucleus_id_j >= 0
++                    && ctx.nucleus_id_i != ctx.nucleus_id_j;
++                let eps = self.couplings.lj_epsilon
++                    * if inter { self.couplings.lj_inter_group_factor } else { 1.0 };
++                // <reason>Same 0.5σ floor as force computation for consistency</reason>
++                let sr = sigma / ctx.r.max(0.5 * sigma);
++                let sr6 = sr.powi(6);
++                v += 4.0 * eps * (sr6 * sr6 - sr6);
++            }
++        }
++
+         v
+     }
+     
+@@ -843,6 +921,25 @@ impl Lagrangian for StandardModelLagrangian {
+                     self.couplings.grav = coupling;
+                 }
+             }
++
++            // <reason>Lennard-Jones: V = 4ε[(σ/r)¹² − (σ/r)⁶] (coarse-grained van der Waals)</reason>
++            if let Some(lj) = potential.get("lennard_jones") {
++                if let Some(enabled) = lj.get("enabled").and_then(|v| v.as_bool()) {
++                    self.flags.lennard_jones = enabled;
++                }
++                if let Some(epsilon) = lj.get("epsilon").and_then(|v| v.as_f64()) {
++                    self.couplings.lj_epsilon = epsilon;
++                }
++                if let Some(sigma) = lj.get("sigma").and_then(|v| v.as_f64()) {
++                    self.couplings.lj_sigma = sigma;
++                }
++                if let Some(cf) = lj.get("cutoff_factor").and_then(|v| v.as_f64()) {
++                    self.couplings.lj_cutoff_factor = cf;
++                }
++                if let Some(igf) = lj.get("inter_group_factor").and_then(|v| v.as_f64()) {
++                    self.couplings.lj_inter_group_factor = igf;
++                }
++            }
+             
+             // <reason>Q-desic Gravity: V = -G·m_i·m_j/r·(1 + δ_qdesic)</reason>
+             if let Some(qdesic) = potential.get("qdesic_gravity") {
+@@ -1329,7 +1426,7 @@ mod tests {
+             dx: 1.0, dy: 0.0, dz: 0.0,
+             r: 1.0, r_sq: 1.0,
+             m_i: 1.0, q_i: 1.0, color_i: 0, weak_isospin_i: 0.0, nuclear_coupling_i: 0.0, nucleus_id_i: -1,
+-            m_j: 1.0, q_j: -1.0, color_j: 0, weak_isospin_j: 0.0, nuclear_coupling_j: 0.0, nucleus_id_j: -1,
++            m_j: 1.0, q_j: -1.0, color_j: 0, weak_isospin_j: 0.0, nuclear_coupling_j: 0.0, nucleus_id_j: -1, bonded: false,
+         };
+ 
+         let f = lag.pairwise_force(&ctx);
+@@ -1351,7 +1448,7 @@ mod tests {
+             dx: 1.0, dy: 0.0, dz: 0.0,
+             r: 1.0, r_sq: 1.0,
+             m_i: 1.0, q_i: 0.0, color_i: 0, weak_isospin_i: 0.0, nuclear_coupling_i: 0.0, nucleus_id_i: -1,
+-            m_j: 1.0, q_j: 0.0, color_j: 0, weak_isospin_j: 0.0, nuclear_coupling_j: 0.0, nucleus_id_j: -1,
++            m_j: 1.0, q_j: 0.0, color_j: 0, weak_isospin_j: 0.0, nuclear_coupling_j: 0.0, nucleus_id_j: -1, bonded: false,
+         };
+         
+         let f = lag.pairwise_force(&ctx);

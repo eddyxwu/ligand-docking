@@ -1,0 +1,71 @@
+diff --git a/lagra-core/src/bin/renderer/runtime_validator.rs b/lagra-core/src/bin/renderer/runtime_validator.rs
+index 2411c87..2d3d4a4 100644
+--- a/lagra-core/src/bin/renderer/runtime_validator.rs
++++ b/lagra-core/src/bin/renderer/runtime_validator.rs
+@@ -38,6 +38,9 @@ pub trait WorldSnapshot {
+     fn color_charge(&self) -> &[i8];
+     fn sizes(&self) -> &[f64];
+     fn names(&self) -> &[String];
++    /// <reason>Position-restraint stiffness per particle (0 = unrestrained)</reason>
++    /// <reason>Default empty: snapshot replays don't store restraints</reason>
++    fn tether_k(&self) -> &[f64] { &[] }
+     
+     /// <reason>Computed aggregate properties</reason>
+     fn total_energy(&self) -> f64;
+@@ -958,6 +961,56 @@ impl RuntimeValidator {
+                 }
+                 ValidationCheck::new(&validator.name, 0.0, max_v, validator.tolerance, &validator.unit)
+             }
++
++            "rmsd_from_reference" => {
++                // <reason>RMSD of restrained particles vs their reference (initial/crystal)</reason>
++                // <reason>positions: RMSD = sqrt(mean |p_i - p_i(0)|²). The canonical MD</reason>
++                // <reason>structural-stability metric. Restrained particles (tether_k > 0)</reason>
++                // <reason>define the reference structure (e.g. a protein's PDB coordinates);</reason>
++                // <reason>if nothing is restrained, all particles are measured.</reason>
++                let tethers = world.tether_k();
++                let restrained_only = tethers.iter().any(|&k| k > 0.0);
++                let mut sum_sq = 0.0f64;
++                let mut count = 0usize;
++                for i in 0..n.min(self.initial.particle_states.len()) {
++                    if restrained_only && tethers.get(i).map_or(true, |&k| k <= 0.0) { continue; }
++                    let p0 = self.initial.particle_states[i].position;
++                    let dx = px[i] - p0.x;
++                    let dy = py[i] - p0.y;
++                    let dz = pz[i] - p0.z;
++                    sum_sq += dx * dx + dy * dy + dz * dz;
++                    count += 1;
++                }
++                let rmsd = if count > 0 { (sum_sq / count as f64).sqrt() } else { 0.0 };
++                ValidationCheck::new(&validator.name, 0.0, rmsd, validator.tolerance, &validator.unit)
++            }
++
++            "binding_site_distance" => {
++                // <reason>Binding reaction coordinate: distance between the ligand's center of</reason>
++                // <reason>mass (particles named "ligand*") and the binding-site centroid</reason>
++                // <reason>(particles named "receptor_site*"). Bound state = distance below</reason>
++                // <reason>tolerance. Same outcome-validator pattern as rutherford_scattering_angle:</reason>
++                // <reason>the scene's expected physics event is certified, not eyeballed.</reason>
++                let names = world.names();
++                let (mut lx, mut ly, mut lz, mut lm) = (0.0f64, 0.0f64, 0.0f64, 0.0f64);
++                let (mut sx, mut sy, mut sz, mut sc) = (0.0f64, 0.0f64, 0.0f64, 0usize);
++                for i in 0..n.min(names.len()) {
++                    if names[i].starts_with("ligand") {
++                        lx += mass[i] * px[i]; ly += mass[i] * py[i]; lz += mass[i] * pz[i];
++                        lm += mass[i];
++                    } else if names[i].starts_with("receptor_site") {
++                        sx += px[i]; sy += py[i]; sz += pz[i];
++                        sc += 1;
++                    }
++                }
++                // <reason>Scenes without ligand/site particles: coordinate undefined, report 0</reason>
++                let dist = if lm > 0.0 && sc > 0 {
++                    let (cx, cy, cz) = (lx / lm, ly / lm, lz / lm);
++                    let (bx, by, bz) = (sx / sc as f64, sy / sc as f64, sz / sc as f64);
++                    ((cx - bx).powi(2) + (cy - by).powi(2) + (cz - bz).powi(2)).sqrt()
++                } else { 0.0 };
++                ValidationCheck::new(&validator.name, 0.0, dist, validator.tolerance, &validator.unit)
++            }
+             
+             "max_position" => {
+                 // <reason>Check maximum position magnitude of any particle</reason>

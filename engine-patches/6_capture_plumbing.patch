@@ -1,0 +1,110 @@
+diff --git a/lagra-core/src/bin/renderer/main.rs b/lagra-core/src/bin/renderer/main.rs
+index 79d223f..1ff9d7e 100644
+--- a/lagra-core/src/bin/renderer/main.rs
++++ b/lagra-core/src/bin/renderer/main.rs
+@@ -309,7 +309,7 @@ fn parse_args() -> Args {
+     
+     Args { scene, list_scenes, capture, capture_zoom, force_demo, force_mode, render_profile, action_zoom, environment, continuous, verify, track, trace, trace_steps, computed_entities, emergence, sparse_capture, benchmark, serial, barnes_hut_theta, no_barnes_hut, max_cpus, project }
+ }
+-use math::Camera;
++use math::{Camera, Vec3};
+ use world::{World, SolverMode};
+ use scene_loader::SceneLoader;
+ use config::PhysicsInfo;
+@@ -660,12 +660,14 @@ fn copy_to_clipboard(text: &str) -> bool {
+ /// <reason>Runs until termination condition or max steps, auto-adjusts to keep video ≤20s</reason>
+ /// <reason>When max_frames=0, runs headless physics only without captures (replaces old turbo mode)</reason>
+ fn run_sparse_capture(
+-    loader: &SceneLoader, 
+-    scene_name: &str, 
+-    max_frames: usize, 
++    loader: &SceneLoader,
++    scene_name: &str,
++    max_frames: usize,
+     base_step_interval: usize,
+     zoom: f64,
+     environment: Option<&str>,
++    render_profile: RenderProfile,
++    force_mode: Option<&str>,
+ ) {
+     use std::time::Instant;
+     
+@@ -726,7 +728,14 @@ fn run_sparse_capture(
+         std::fs::create_dir_all(&output_dir).ok();
+         let mut r = Renderer::new();
+         r.set_length_unit(&loaded.display.length_unit);  // <reason>Use scene's length unit for axis labels</reason>
++        r.set_scene_labels(loaded.display.title.clone(), loaded.display.annotations.clone());
+         r.compute_grid_extents(&world);
++        // <reason>Apply CLI/scene-default render profile (grid only shows in Debug)</reason>
++        r.set_render_profile(render_profile);
++        // <reason>Honor -f/--force in sparse mode so force-arrow videos can be rendered</reason>
++        if let Some(fm) = force_mode {
++            r.set_force_mode(fm);
++        }
+         Some(r)
+     } else {
+         None
+@@ -1353,7 +1362,12 @@ fn main() {
+     // <reason>Handle --sparse flag to run headless sparse capture and exit</reason>
+     if let Some((total_frames, step_interval)) = args.sparse_capture {
+         let scene_name = args.scene.as_deref().unwrap_or("hydrogen_quantum");
+-        run_sparse_capture(&loader, scene_name, total_frames, step_interval, args.capture_zoom, args.environment.as_deref());
++        // <reason>Honor --render-profile in sparse mode (falls back to scene default)</reason>
++        let profile = args.render_profile
++            .as_deref()
++            .and_then(RenderProfile::from_str)
++            .unwrap_or_else(|| default_render_profile_for_scene(scene_name));
++        run_sparse_capture(&loader, scene_name, total_frames, step_interval, args.capture_zoom, args.environment.as_deref(), profile, args.force_mode.as_deref());
+         return;
+     }
+     
+@@ -1420,7 +1434,8 @@ fn main() {
+     
+     // <reason>Store display settings for renderer configuration</reason>
+     let mut current_length_unit = "fm".to_string();
+-    
++    let mut current_labels: (Option<String>, Vec<(String, Vec3)>) = (None, Vec::new());
++
+     // <reason>Initial scene load with physics info extraction</reason>
+     if let Some(loaded) = loader.load_scene_full(&current) {
+         world = loaded.world;
+@@ -1429,6 +1444,7 @@ fn main() {
+         terminate_when = loaded.terminate_when;
+         scene_steps_per_frame = loaded.solver_steps_per_frame;
+         current_length_unit = loaded.display.length_unit.clone();  // <reason>Store length unit for renderer</reason>
++        current_labels = (loaded.display.title.clone(), loaded.display.annotations.clone());
+         // <reason>Set scene info for validation logging</reason>
+         world.validator.set_scene(&loaded.scene_name, &loaded.lagrangian_json);
+     } else {
+@@ -1473,6 +1489,7 @@ fn main() {
+ 
+     let mut rend = Renderer::new();
+     rend.set_length_unit(&current_length_unit);  // <reason>Use scene's length unit for axis labels</reason>
++    rend.set_scene_labels(current_labels.0.clone(), current_labels.1.clone());
+     let cli_render_profile = args.render_profile
+         .as_ref()
+         .and_then(|s| RenderProfile::from_str(s));
+@@ -1719,6 +1736,7 @@ fn main() {
+                 scene_steps_per_frame = loaded.solver_steps_per_frame;
+                 current_length_unit = loaded.display.length_unit.clone();
+                 rend.set_length_unit(&current_length_unit);  // <reason>Update axis labels on reset</reason>
++                rend.set_scene_labels(loaded.display.title.clone(), loaded.display.annotations.clone());
+                 world.validator.set_scene(&loaded.scene_name, &loaded.lagrangian_json);
+             }
+             // <reason>Re-apply current environment after reset (preserves user's B-key selection)</reason>
+@@ -1754,6 +1772,7 @@ fn main() {
+                         scene_steps_per_frame = loaded.solver_steps_per_frame;
+                         current_length_unit = loaded.display.length_unit.clone();
+                         rend.set_length_unit(&current_length_unit);  // <reason>Update axis labels on scene change</reason>
++                        rend.set_scene_labels(loaded.display.title.clone(), loaded.display.annotations.clone());
+                         world.validator.set_scene(&loaded.scene_name, &loaded.lagrangian_json);
+                         println!("\n📁 Loaded: {}", name);
+                     }
+@@ -2193,6 +2212,7 @@ fn main() {
+                             scene_steps_per_frame = loaded.solver_steps_per_frame;
+                             current_length_unit = loaded.display.length_unit.clone();
+                             rend.set_length_unit(&current_length_unit);  // <reason>Update axis labels on scene change</reason>
++                            rend.set_scene_labels(loaded.display.title.clone(), loaded.display.annotations.clone());
+                             world.validator.set_scene(&loaded.scene_name, &loaded.lagrangian_json);
+                             rend.compute_grid_extents(&world);
+                             let profile = cli_render_profile.unwrap_or_else(|| default_render_profile_for_scene(original));

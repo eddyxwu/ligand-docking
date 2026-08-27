@@ -1,0 +1,113 @@
+{
+  "_excerpt_of": "configs/particles.json -> classical",
+  "beads": {
+    "receptor_bead": {
+      "_description": "Coarse-grained receptor bead - neutral, harmonically restrained to its crystal position (restrained-MD position restraints). Interacts via Lennard-Jones only. Shade variant for molecular-surface depth.",
+      "mass_mev": 1000.0,
+      "charge": 0.0,
+      "spin": 0.0,
+      "size_fm": 0.6,
+      "visual_scale": 72.0,
+      "color_charge": "none",
+      "weak_isospin": 0.0,
+      "display_color": "#e2f0ff",
+      "symbol": "●"
+    },
+    "ligand_bead": {
+      "_description": "Coarse-grained ligand bead - neutral, light and mobile. Interacts via Lennard-Jones only (van der Waals attraction drives docking). Shade variant.",
+      "mass_mev": 350.0,
+      "charge": 0.0,
+      "spin": 0.0,
+      "size_fm": 0.6,
+      "visual_scale": 48.0,
+      "color_charge": "none",
+      "weak_isospin": 0.0,
+      "display_color": "#ffdda0",
+      "symbol": "●"
+    },
+    "receptor_bead_md": {
+      "_description": "Coarse-grained receptor bead - neutral, harmonically restrained to its crystal position (restrained-MD position restraints). Interacts via Lennard-Jones only. Shade variant for molecular-surface depth.",
+      "mass_mev": 1000.0,
+      "charge": 0.0,
+      "spin": 0.0,
+      "size_fm": 0.6,
+      "visual_scale": 72.0,
+      "color_charge": "none",
+      "weak_isospin": 0.0,
+      "display_color": "#bdd6ee",
+      "symbol": "●"
+    },
+    "receptor_bead_dk": {
+      "_description": "Coarse-grained receptor bead - neutral, harmonically restrained to its crystal position (restrained-MD position restraints). Interacts via Lennard-Jones only. Shade variant for molecular-surface depth.",
+      "mass_mev": 1000.0,
+      "charge": 0.0,
+      "spin": 0.0,
+      "size_fm": 0.6,
+      "visual_scale": 72.0,
+      "color_charge": "none",
+      "weak_isospin": 0.0,
+      "display_color": "#9ab6d4",
+      "symbol": "●"
+    },
+    "ligand_bead_dk": {
+      "_description": "Coarse-grained ligand bead - neutral, light and mobile. Interacts via Lennard-Jones only (van der Waals attraction drives docking). Shade variant.",
+      "mass_mev": 350.0,
+      "charge": 0.0,
+      "spin": 0.0,
+      "size_fm": 0.6,
+      "visual_scale": 48.0,
+      "color_charge": "none",
+      "weak_isospin": 0.0,
+      "display_color": "#ffb955",
+      "symbol": "●"
+    },
+    "receptor_site": {
+      "_description": "Coarse-grained receptor binding-site bead - lines the pocket. Physically identical to receptor_bead; teal highlight marks the binding site (standard molecular-viz practice).",
+      "mass_mev": 1000.0,
+      "charge": 0.0,
+      "spin": 0.0,
+      "size_fm": 0.6,
+      "visual_scale": 72.0,
+      "color_charge": "none",
+      "weak_isospin": 0.0,
+      "display_color": "#8ffcda",
+      "symbol": "●"
+    },
+    "receptor_site_dk": {
+      "_description": "Coarse-grained receptor binding-site bead - lines the pocket. Physically identical to receptor_bead; teal highlight marks the binding site (standard molecular-viz practice).",
+      "mass_mev": 1000.0,
+      "charge": 0.0,
+      "spin": 0.0,
+      "size_fm": 0.6,
+      "visual_scale": 72.0,
+      "color_charge": "none",
+      "weak_isospin": 0.0,
+      "display_color": "#62dcb4",
+      "symbol": "●"
+    },
+    "frame_anchor": {
+      "_description": "Invisible static framing anchor - pins the scene bounding radius so event-driven capture keeps a fixed camera. Far outside every interaction cutoff; visually a 3px background-color dot.",
+      "mass_mev": 100000000.0,
+      "charge": 0.0,
+      "spin": 0.0,
+      "size_fm": 0.1,
+      "visual_scale": 0.01,
+      "color_charge": "none",
+      "weak_isospin": 0.0,
+      "display_color": "#10141c",
+      "symbol": "·"
+    },
+    "ligand_bead_o": {
+      "_description": "Coarse-grained tri-NAG arm bead (acetyl/hydroxymethyl group centroid) - red accent so the sugar chain reads as chemistry. Physically identical to ligand_bead.",
+      "mass_mev": 350.0,
+      "charge": 0.0,
+      "spin": 0.0,
+      "size_fm": 0.6,
+      "visual_scale": 38.0,
+      "color_charge": "none",
+      "weak_isospin": 0.0,
+      "display_color": "#d94f3d",
+      "symbol": "●"
+    }
+  }
+}

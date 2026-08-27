@@ -1,0 +1,59 @@
+{
+  "_excerpt_of": "configs/validators.json (entries used by the scene; receptor_rmsd and binding_reaction_coordinate are new)",
+  "validators": {
+    "receptor_rmsd": {
+      "name": "Receptor RMSD vs Reference",
+      "description": "Root-mean-square deviation of restrained particles from their reference (crystal) coordinates must stay bounded",
+      "type": "rmsd_from_reference",
+      "tolerance": 0.8,
+      "unit": "sigma",
+      "run_every": 100,
+      "physics_note": "The canonical MD structural-stability metric: RMSD = sqrt(mean |r_i - r_i(ref)|^2) over restrained particles. For a position-restrained structure the expected plateau is the thermal fluctuation amplitude (coarse analog of crystallographic B-factors); unbounded growth means the fold is degrading. Tolerance 0.8 sigma = ~2x the measured plateau of the restrained lysozyme C-alpha trace (~0.4 sigma)."
+    },
+    "binding_reaction_coordinate": {
+      "name": "Binding Reaction Coordinate",
+      "description": "Distance between ligand center of mass and binding-site centroid must reach the bound basin",
+      "type": "binding_site_distance",
+      "tolerance": 2.9,
+      "unit": "sigma",
+      "run_every": 100,
+      "physics_note": "The reaction coordinate of a binding event: |COM(ligand) - centroid(site residues)|. Calibrated against the 1SFB crystallographic pose: penta-NAG's crystal pose (spanning sub-sites A-E exactly) measures 2.07 sigma from the site-lining C-alpha centroid, so tolerance 2.9 = crystal value + 0.8 sigma thermal margin - the validator certifies the ligand re-entered the crystallographic bound basin. Unbound approach starts at ~8 sigma. Reads as FAIL during approach by construction and flips to PASS at the rebinding event - an outcome validator in the same spirit as rutherford_scattering_angle."
+    },
+    "energy_stability": {
+      "name": "Energy Stability",
+      "description": "Total energy should not drift catastrophically (symplectic integrator)",
+      "type": "energy_drift_percent",
+      "tolerance": 100.0,
+      "unit": "%",
+      "run_every": 500,
+      "physics_note": "KNOWN LIMITATION: Relativistic symplectic Euler does NOT conserve the relativistic Hamiltonian H=√(p²+m²)+V. Energy drift is expected for: (1) highly relativistic particles (v→c), (2) strong forces (nuclear scales), (3) extreme mass ratios (electron/proton). Tolerance of 100% catches catastrophic instabilities while accepting expected integrator limitations. For strict energy conservation, use non-relativistic scenes or implement Boris pusher."
+    },
+    "momentum_conservation": {
+      "name": "Momentum Conservation",
+      "description": "Total momentum must remain constant (Newton's third law)",
+      "type": "momentum_conservation",
+      "tolerance": 50.0,
+      "unit": "MeV·fm/c",
+      "run_every": 100,
+      "physics_note": "Σp_initial = Σp_final for isolated systems. Tolerance of 50 MeV·fm/c accounts for: (1) relativistic symplectic Euler integration drift, (2) extreme mass ratios (electron/proton ~1800:1), (3) long-running simulations (10k+ steps). Violations >>50 indicate real physics bugs, not numerical error."
+    },
+    "charge_conservation": {
+      "name": "Charge Conservation",
+      "description": "Total electric charge must remain constant",
+      "type": "charge_conservation",
+      "tolerance": 1e-06,
+      "unit": "e",
+      "run_every": 50,
+      "physics_note": "Charge is absolutely conserved in all known processes"
+    },
+    "subluminal_velocity": {
+      "name": "Velocity < c",
+      "description": "All particle velocities must be below speed of light",
+      "type": "max_velocity",
+      "tolerance": 1.0,
+      "unit": "c",
+      "run_every": 10,
+      "physics_note": "Special relativity: v < c always. Cheap check - run frequently to catch violations early."
+    }
+  }
+}

@@ -1,0 +1,238 @@
+diff --git a/lagra-core/src/bin/renderer/world.rs b/lagra-core/src/bin/renderer/world.rs
+index fbd5db0..b6f3581 100644
+--- a/lagra-core/src/bin/renderer/world.rs
++++ b/lagra-core/src/bin/renderer/world.rs
+@@ -225,6 +225,10 @@ pub struct World {
+     nuclear_coupling: f64, nuclear_range: f64,
+     nuclear_core_radius: f64, nuclear_core_strength: f64, nuclear_cutoff: f64,
+     nuclear_min_separation: f64,
++
++    // <reason>Lennard-Jones (from Lagrangian): mirrored for force breakdown visualization</reason>
++    pub has_lj: bool,
++    lj_epsilon: f64, lj_sigma: f64, lj_cutoff_factor: f64, lj_inter_group_factor: f64,
+     
+     // Orbital stabilization (from Lagrangian)
+     pub has_orbital_stabilization: bool,
+@@ -268,6 +272,17 @@ pub struct World {
+     // Emission tracking
+     pub initial_px: Vec<f64>, pub initial_py: Vec<f64>, pub initial_pz: Vec<f64>,
+     pub boundary_radius: Vec<f64>, pub emitted: Vec<bool>,
++    // <reason>Position restraints (restrained MD): stiffness of the harmonic tether</reason>
++    // <reason>anchoring a particle to its initial position. 0 = unrestrained.</reason>
++    pub tether_k: Vec<f64>,
++    // <reason>Harmonic bonds: (i, j, r0, k) with V = ½k(r − r0)². Internal pairwise</reason>
++    // <reason>forces (Newton's third law), so they conserve total momentum. Used to hold</reason>
++    // <reason>coarse-grained molecular topologies (e.g. a bonded ligand) together.</reason>
++    pub bonds: Vec<(usize, usize, f64, f64)>,
++    // <reason>Bonded-exclusion set (min,max index pairs): bonded pairs interact through</reason>
++    // <reason>their bond ONLY, not through nonbonded LJ — the standard force-field 1-2</reason>
++    // <reason>exclusion. Without it, bonds shorter than σ sit inside the LJ wall and explode.</reason>
++    bond_set: std::collections::HashSet<(usize, usize)>,
+     pub event_log: Vec<String>, pub logging_enabled: bool,
+     
+     // Fusion state
+@@ -342,6 +357,8 @@ impl World {
+             has_nuclear: false, nuclear_coupling: 0.0, nuclear_range: 0.0,
+             nuclear_core_radius: 0.0, nuclear_core_strength: 0.0, nuclear_cutoff: 0.0,
+             nuclear_min_separation: 0.0,
++            // <reason>Lennard-Jones disabled until Lagrangian configures it</reason>
++            has_lj: false, lj_epsilon: 0.0, lj_sigma: 1.0, lj_cutoff_factor: 2.5, lj_inter_group_factor: 1.0,
+             // Orbital stabilization
+             has_orbital_stabilization: false, orbital_equilibrium_radius: 0.0,
+             orbital_stiffness: 0.0, orbital_damping: 0.0,
+@@ -382,6 +399,9 @@ impl World {
+             // Emission tracking
+             initial_px: Vec::new(), initial_py: Vec::new(), initial_pz: Vec::new(),
+             boundary_radius: Vec::new(), emitted: Vec::new(),
++            tether_k: Vec::new(),
++            bonds: Vec::new(),
++            bond_set: std::collections::HashSet::new(),
+             event_log: Vec::new(), logging_enabled: false,
+             // Fusion
+             fusion: FusionSystem::new(), nucleus_id: Vec::new(), fission_events: 0, prev_nucleus_count: 0,
+@@ -524,6 +544,13 @@ impl World {
+             self.nuclear_coupling = couplings.nuclear;
+             self.nuclear_range = couplings.nuclear_range;
+ 
++            // <reason>Cache Lennard-Jones parameters for force breakdown visualization</reason>
++            self.has_lj = flags.lennard_jones;
++            self.lj_epsilon = couplings.lj_epsilon;
++            self.lj_sigma = couplings.lj_sigma;
++            self.lj_cutoff_factor = couplings.lj_cutoff_factor;
++            self.lj_inter_group_factor = couplings.lj_inter_group_factor;
++
+             // <reason>Cache QCD color factors and hadron_only from Lagrangian</reason>
+             let cf = &couplings.qcd_color_factors;
+             self.qcd_color_anticolor = cf.color_anticolor;
+@@ -638,6 +665,7 @@ impl World {
+                 color_j: self.color_charge[j], weak_isospin_j: self.weak_isospin[j],
+                 nuclear_coupling_j: self.hadron_factor[j],
+                 nucleus_id_j: self.nucleus_id.get(j).copied().unwrap_or(-1),
++                bonded: self.is_bonded(i, j),
+             };
+ 
+             let f = lag.pairwise_force(&ctx);
+@@ -693,6 +721,30 @@ impl World {
+         self.boundary_radius.push(size * 0.1);
+         self.emitted.push(false);
+         self.nucleus_id.push(-1);
++        self.tether_k.push(0.0);
++    }
++
++    /// <reason>Enable a position restraint: harmonic tether to the particle's initial</reason>
++    /// <reason>position with stiffness k (restrained MD). k <= 0 disables.</reason>
++    pub fn set_tether(&mut self, i: usize, k: f64) {
++        if i < self.tether_k.len() {
++            self.tether_k[i] = k.max(0.0);
++        }
++    }
++
++    /// <reason>Add a harmonic bond between particles i and j: V = ½k(r − r0)²</reason>
++    /// <reason>Bonded pairs are excluded from nonbonded LJ (standard 1-2 exclusion)</reason>
++    pub fn add_bond(&mut self, i: usize, j: usize, r0: f64, k: f64) {
++        if i < self.len() && j < self.len() && i != j && k > 0.0 && r0 > 0.0 {
++            self.bonds.push((i, j, r0, k));
++            self.bond_set.insert((i.min(j), i.max(j)));
++        }
++    }
++
++    /// <reason>True when i and j share a harmonic bond (nonbonded-exclusion check)</reason>
++    #[inline]
++    pub fn is_bonded(&self, i: usize, j: usize) -> bool {
++        !self.bond_set.is_empty() && self.bond_set.contains(&(i.min(j), i.max(j)))
+     }
+     
+     // <reason>Add a particle with default properties (for remote compute frame application)</reason>
+@@ -720,6 +772,15 @@ impl World {
+         self.boundary_radius.remove(i);
+         self.emitted.remove(i);
+         self.nucleus_id.remove(i);
++        self.tether_k.remove(i);
++        // <reason>Bonds referencing removed particle are dropped; higher indices shift down</reason>
++        self.bonds.retain(|&(a, b, _, _)| a != i && b != i);
++        for bond in self.bonds.iter_mut() {
++            if bond.0 > i { bond.0 -= 1; }
++            if bond.1 > i { bond.1 -= 1; }
++        }
++        // <reason>Rebuild the exclusion set to match the remapped bond indices</reason>
++        self.bond_set = self.bonds.iter().map(|&(a, b, _, _)| (a.min(b), a.max(b))).collect();
+     }
+     
+     pub fn init_avbd(&mut self) {
+@@ -1165,6 +1226,19 @@ impl World {
+         let mut forces = self.compute_forces_avbd();
+         profiler::end();
+ 
++        // <reason>Harmonic bonds: F = -k(r − r0)r̂ applied equal-and-opposite (Newton's</reason>
++        // <reason>third law) — internal forces, so total momentum stays conserved.</reason>
++        for &(i, j, r0, k) in &self.bonds {
++            let d = self.pos(j).sub(self.pos(i));
++            let r = d.len();
++            if r > 1e-10 {
++                // <reason>Positive (r − r0): stretched bond pulls i toward j</reason>
++                let f = d.scale(k * (r - r0) / r);
++                forces[i] = forces[i].add(f);
++                forces[j] = forces[j].sub(f);
++            }
++        }
++
+         // <reason>ADAPTIVE INTEGRATION: Derive safe timestep from Lagrangian mechanics</reason>
+         // <reason>Characteristic timescale τ ~ sqrt(m*r/|F|) from equation of motion</reason>
+         // <reason>For potential V(r), F = -dV/dr, and stability requires dt << τ</reason>
+@@ -1256,6 +1330,15 @@ impl World {
+                 _ => {}
+             }
+ 
++            // <reason>Position restraint (restrained MD): F = -k(p - p_initial)</reason>
++            // <reason>Keeps coarse-grained structures (e.g. a protein C-alpha trace) near</reason>
++            // <reason>their reference coordinates while allowing thermal fluctuation.</reason>
++            // <reason>NOTE: external force - breaks total momentum conservation by design.</reason>
++            if self.tether_k[i] > 0.0 {
++                let anchor = Vec3::new(self.initial_px[i], self.initial_py[i], self.initial_pz[i]);
++                f = f.sub(p.sub(anchor).scale(self.tether_k[i]));
++            }
++
+             // Lorentz force: F = qE + qv×B
+             f = f.add(self.elec_field.scale(self.charge[i]));
+             f = f.add(self.vel(i).cross(self.mag_field).scale(self.charge[i]));
+@@ -2072,7 +2155,28 @@ impl World {
+             let g = self.grav_coupling * mi * mj * inv_r2 * (1.0 + self.qdesic_gravity_correction(r, mi + mj));
+             bd.gravitational = Vec3::new(rx_h * g, ry_h * g, rz_h * g);
+         }
+-        
++
++        // <reason>Lennard-Jones: van der Waals is residual electromagnetism (induced dipoles),</reason>
++        // <reason>so it reports under the EM channel. Mirrors StandardModelLagrangian exactly:</reason>
++        // <reason>F(r) = 24ε[2(σ/r)¹² − (σ/r)⁶]/r, inter-group ε scaling, 0.5σ floor.</reason>
++        if self.has_lj && self.lj_epsilon > 0.0 && !self.is_bonded(i, j) {
++            let sigma = self.lj_sigma.max(1e-10);
++            let r = inv_r.recip();
++            if r < sigma * self.lj_cutoff_factor {
++                let nid_i = self.nucleus_id.get(i).copied().unwrap_or(-1);
++                let nid_j = self.nucleus_id.get(j).copied().unwrap_or(-1);
++                let inter = nid_i >= 0 && nid_j >= 0 && nid_i != nid_j;
++                let eps = self.lj_epsilon * if inter { self.lj_inter_group_factor } else { 1.0 };
++                let r_floored = r.max(0.5 * sigma);
++                let sr = sigma / r_floored;
++                let sr6 = sr.powi(6);
++                let sr12 = sr6 * sr6;
++                let lj_mag = 24.0 * eps * (2.0 * sr12 - sr6) / r_floored;
++                // <reason>Positive lj_mag = repulsive = force on i away from j (−r̂)</reason>
++                bd.electromagnetic = bd.electromagnetic.add(Vec3::new(-rx_h * lj_mag, -ry_h * lj_mag, -rz_h * lj_mag));
++            }
++        }
++
+         bd
+     }
+     
+@@ -2123,7 +2227,42 @@ impl World {
+                 }
+             }
+             if self.has_grav { pot += -self.grav_coupling * self.mass[i] * self.mass[j] / r; }
++            // <reason>Lennard-Jones potential: V = 4ε[(σ/r)¹² − (σ/r)⁶] with inter-group scaling (see below)</reason>
++            // <reason>Bonded pairs excluded (1-2 exclusion): their interaction is the bond term</reason>
++            if self.has_lj && self.lj_epsilon > 0.0 && !self.is_bonded(i, j) {
++                let sigma = self.lj_sigma.max(1e-10);
++                if r < sigma * self.lj_cutoff_factor {
++                    let nid_i = self.nucleus_id.get(i).copied().unwrap_or(-1);
++                    let nid_j = self.nucleus_id.get(j).copied().unwrap_or(-1);
++                    let inter = nid_i >= 0 && nid_j >= 0 && nid_i != nid_j;
++                    let eps = self.lj_epsilon * if inter { self.lj_inter_group_factor } else { 1.0 };
++                    let sr = sigma / r.max(0.5 * sigma);
++                    let sr6 = sr.powi(6);
++                    pot += 4.0 * eps * (sr6 * sr6 - sr6);
++                }
++            }
+         }}
++
++        // <reason>Position-restraint potential: V = ½k|p − p₀|² per restrained particle.</reason>
++        // <reason>The restraint is part of the Hamiltonian: without this term the energy</reason>
++        // <reason>monitor would report spurious drift whenever restrained particles move.</reason>
++        for i in 0..self.len() {
++            if self.tether_k[i] > 0.0 {
++                let dx = self.px[i] - self.initial_px[i];
++                let dy = self.py[i] - self.initial_py[i];
++                let dz = self.pz[i] - self.initial_pz[i];
++                pot += 0.5 * self.tether_k[i] * (dx * dx + dy * dy + dz * dz);
++            }
++        }
++
++        // <reason>Harmonic-bond potential: V = ½k(r − r0)² per bond (part of the Hamiltonian)</reason>
++        for &(i, j, r0, k) in &self.bonds {
++            let dx = self.px[j] - self.px[i];
++            let dy = self.py[j] - self.py[i];
++            let dz = self.pz[j] - self.pz[i];
++            let r = (dx * dx + dy * dy + dz * dz).sqrt();
++            pot += 0.5 * k * (r - r0) * (r - r0);
++        }
+         pot
+     }
+ 
+@@ -2320,6 +2459,7 @@ impl WorldSnapshot for World {
+     fn color_charge(&self) -> &[i8] { &self.color_charge }
+     fn sizes(&self) -> &[f64] { &self.sizes }
+     fn names(&self) -> &[String] { &self.names }
++    fn tether_k(&self) -> &[f64] { &self.tether_k }
+     fn total_energy(&self) -> f64 { World::total_energy(self) }
+     fn total_kinetic_energy(&self) -> f64 { World::total_kinetic_energy(self) }
+     fn total_potential_energy(&self) -> f64 { World::total_potential_energy(self) }

@@ -1,0 +1,87 @@
+diff --git a/lagra-core/src/bin/renderer/config.rs b/lagra-core/src/bin/renderer/config.rs
+index 2937616..28c1c83 100644
+--- a/lagra-core/src/bin/renderer/config.rs
++++ b/lagra-core/src/bin/renderer/config.rs
+@@ -209,6 +209,8 @@ pub struct SceneDef {
+     #[serde(default)] pub lagrangian: LagrangianDef,
+     #[serde(default)] pub solver: SolverDef,
+     pub entities: Vec<EntityRef>,
++    // <reason>Harmonic bonds between entities (world indices = entity emission order)</reason>
++    #[serde(default)] pub bonds: Vec<BondDef>,
+     // <reason>NEW: Physics preset + SM parameters for Lagrangian-first architecture</reason>
+     // <reason>If present, overrides legacy ad-hoc coupling values in lagrangian.interactions</reason>
+     #[serde(default)] pub physics: Option<PhysicsConfig>,
+@@ -576,6 +578,22 @@ pub struct EntityRef {
+     #[serde(default)] pub color: String,
+     #[serde(default)] pub position: [f64; 3],
+     #[serde(default)] pub velocity: [f64; 3],
++    // <reason>Optional molecule grouping: entities sharing a group share a nucleus_id,</reason>
++    // <reason>enabling intra- vs inter-molecular interaction scaling (e.g. LJ inter_group_factor)</reason>
++    #[serde(default)] pub group: Option<i64>,
++    // <reason>Optional position restraint: harmonic tether to the entity's initial</reason>
++    // <reason>position with this stiffness (restrained MD). Absent/0 = unrestrained.</reason>
++    #[serde(default)] pub tether_k: Option<f64>,
++}
++
++// <reason>Harmonic bond between two particles (world indices = entity emission order):</reason>
++// <reason>V = ½k(r − r0)². Holds coarse-grained molecular topologies together.</reason>
++#[derive(Debug, Clone, Serialize, Deserialize)]
++pub struct BondDef {
++    pub i: usize,
++    pub j: usize,
++    pub r0: f64,
++    pub k: f64,
+ }
+ 
+ // =============================================================================
+diff --git a/lagra-core/src/bin/renderer/scene_loader.rs b/lagra-core/src/bin/renderer/scene_loader.rs
+index 04658e7..789435e 100644
+--- a/lagra-core/src/bin/renderer/scene_loader.rs
++++ b/lagra-core/src/bin/renderer/scene_loader.rs
+@@ -329,7 +329,9 @@ impl SceneLoader {
+         // <reason>Track nucleus_id for bound structures (nucleons, nuclei)</reason>
+         // <reason>Particles within same template share nucleus_id to prevent spurious re-fusion</reason>
+         let mut next_nucleus_id: i32 = 0;
+-        
++        // <reason>Scene "group" values map to nucleus_ids from the same counter (no collisions)</reason>
++        let mut group_ids: HashMap<i64, i32> = HashMap::new();
++
+         for entity in &scene.entities {
+             if !entity.template.is_empty() {
+                 // <reason>Track particle count before expansion</reason>
+@@ -347,11 +349,35 @@ impl SceneLoader {
+                     next_nucleus_id += 1;
+                 }
+             } else if !entity.particle.is_empty() {
++                let idx = world.len();
+                 self.add_particle(&mut world, &entity.particle, &entity.color,
+                     Vec3::from_array(entity.position), Vec3::from_array(entity.velocity));
++                // <reason>Optional molecule grouping: entities with the same "group" value</reason>
++                // <reason>share a nucleus_id, enabling intra/inter-molecular interaction scaling</reason>
++                if let Some(g) = entity.group {
++                    let id = match group_ids.get(&g) {
++                        Some(&id) => id,
++                        None => {
++                            let id = next_nucleus_id;
++                            next_nucleus_id += 1;
++                            group_ids.insert(g, id);
++                            id
++                        }
++                    };
++                    world.set_nucleus_id(idx, id);
++                }
++                // <reason>Optional position restraint (restrained MD): tether to initial position</reason>
++                if let Some(k) = entity.tether_k {
++                    world.set_tether(idx, k);
++                }
+             }
+         }
+         
++        // <reason>Apply harmonic bonds (world indices = entity emission order)</reason>
++        for b in &scene.bonds {
++            world.add_bond(b.i, b.j, b.r0, b.k);
++        }
++
+         // <reason>Initialize fusion system's nucleus_id counter to continue from scene allocation</reason>
+         world.fusion.set_next_nucleus_id(next_nucleus_id);
+         

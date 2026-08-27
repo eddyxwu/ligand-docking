@@ -1,0 +1,17 @@
+{
+  "_excerpt_of": "configs/lagrangians.json -> standard_model/molecular_dynamics/ligand_docking",
+  "ligand_docking": {
+    "_doc": "Coarse-grained molecular recognition: neutral beads with Lennard-Jones (van der Waals) interactions. Rigid-receptor approximation via heavy receptor beads, as in classical docking (DOCK, Glide).",
+    "potential": {
+      "lennard_jones": {
+        "V": "4*eps*((sigma/r)^12 - (sigma/r)^6)",
+        "epsilon": 18.0,
+        "sigma": 1.0,
+        "cutoff_factor": 2.5,
+        "inter_group_factor": 0.38,
+        "_inter_note": "Ligand-receptor \u03b5 is 0.45\u00d7 ligand-ligand \u03b5: intramolecular cohesion beats intermolecular adhesion, so the ligand docks as a unit instead of wetting the receptor surface. Same idea as intra/inter nonbonded scaling in molecular force fields.",
+        "enabled": true
+      }
+    }
+  }
+}
