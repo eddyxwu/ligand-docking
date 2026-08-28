@@ -1,9 +1,9 @@
-# Engine Contributions — Reading Guide
+# Edits overview
 
-Each patch is a `git diff` of one area of the (private) Rust engine. They are numbered
+Each patch is a `git diff` of one area of the Lagra Rust engine. They are numbered
 in physics-first reading order. Every force term follows the engine's existing
-convention: **the functional form lives in Rust with a derivation comment; every
-parameter comes from JSON config.**
+convention: the functional form lives in Rust with a derivation comment; every
+parameter comes from JSON config.
 
 ## 1 — `1_lennard_jones.patch` (`src/lagrangians.rs`, ~100 lines)
 
