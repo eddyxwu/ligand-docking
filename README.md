@@ -7,6 +7,8 @@ sugar out of the binding groove, let physics run, and it finds its way back to
 where the X-ray says it belongs. Nothing is scripted — the docking emerges from a
 Lennard-Jones potential and shape complementarity alone.
 
+Video here: https://www.youtube.com/watch?v=kRHA0iAW7RY
+
 Built as a scene in Lagra, a Rust physics engine.
 
 ## Try it
