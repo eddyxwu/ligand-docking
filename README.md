@@ -1,13 +1,13 @@
 # ligand-docking
 
-A coarse-grained simulation of **lysozyme catching its sugar substrate**. Both
+A coarse-grained simulation of lysozyme catching its sugar substrate. Both
 molecules come from a real crystal structure (PDB 1SFB) — the protein as one bead
 per residue, the five-ring sugar (penta-NAG) as a flexible bonded chain. Pull the
 sugar out of the binding groove, let physics run, and it finds its way back to
 where the X-ray says it belongs. Nothing is scripted — the docking emerges from a
 Lennard-Jones potential and shape complementarity alone.
 
-Built as an extension to Lagra, a Rust physics engine.
+Built as a scene in Lagra, a Rust physics engine.
 
 ## Try it
 
@@ -34,9 +34,9 @@ The patches show my additions (Lennard-Jones interaction, harmonic bonds with 1-
 
 The simulation checks itself while running:
 
-- energy conserved to **1.4%** over the full run (every potential term bookkept)
-- protein holds **0.39σ RMSD** vs the crystal reference (it jiggles, it doesn't unfold)
-- the binding coordinate drops from 7σ to the crystallographic bound basin (**~2σ**)
+- energy conserved to 1.4% over the full run (every potential term bookkept)
+- protein holds 0.39σ RMSD vs the crystal reference (it jiggles, it doesn't unfold)
+- the binding coordinate drops from 7σ to the crystallographic bound basin (~2σ)
 - for momentum (designed to fail) — position restraints are external forces,
   so it shouldn't be conserved, and the validator confirms exactly that
 
