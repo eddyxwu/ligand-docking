@@ -5,7 +5,7 @@ in physics-first reading order. Every force term follows the engine's existing
 convention: the functional form lives in Rust with a derivation comment; every
 parameter comes from JSON config.
 
-## 1 — `1_lennard_jones.patch` (`src/lagrangians.rs`, ~100 lines)
+## `1_lennard_jones.patch` (`src/lagrangians.rs`, ~100 lines)
 
 The Lennard-Jones interaction as a first-class Lagrangian term:
 **V = 4ε[(σ/r)¹² − (σ/r)⁶]**, force **F = 24ε[2(σ/r)¹² − (σ/r)⁶]/r**, truncated at
@@ -21,7 +21,7 @@ Two design points worth noting:
   conceptually the same as intra/inter nonbonded scaling in molecular force fields.
 - The `bonded` flag on the force context implements the exclusion described in patch 2.
 
-## 2 — `2_bonds_restraints_energy.patch` (`src/bin/renderer/world.rs`, ~140 lines)
+## `2_bonds_restraints_energy.patch` (`src/bin/renderer/world.rs`, ~140 lines)
 
 Three mechanics:
 
@@ -41,32 +41,32 @@ Three mechanics:
   `total_potential_energy`, so the energy validator measures true drift (1.43 %)
   instead of reporting the restraint energy as spurious drift.
 
-## 3 — `3_validators.patch` (`src/bin/renderer/runtime_validator.rs`, ~53 lines)
+## `3_validators.patch` (`src/bin/renderer/runtime_validator.rs`, ~53 lines)
 
 Two new validator types, chosen to mirror how the MD field actually validates:
 
 - **`rmsd_from_reference`** — RMSD of restrained particles vs. their crystal
   coordinates: the canonical structural-stability metric (measured plateau: 0.39 σ).
-- **`binding_site_distance`** — the binding **reaction coordinate**:
+- **`binding_site_distance`** — the binding reaction coordinate:
   |COM(ligand) − centroid(site residues)|. An *outcome* validator: it fails during
   the approach by construction and flips to pass when the ligand enters the bound
   basin (tolerance calibrated against the 1SFB crystal pose: 2.07 σ + thermal margin).
 
-## 4 — `4_scene_plumbing.patch` (`config.rs` + `scene_loader.rs`, ~45 lines)
+## `4_scene_plumbing.patch` (`config.rs` + `scene_loader.rs`, ~45 lines)
 
 Scene-format extensions: per-entity `group` (molecule membership, drives the
 inter-group ε scaling), per-entity `tether_k` (restraints), and a scene-level
 `bonds` list `(i, j, r₀, k)`. The generator emits all three; the engine stays
 free of any scene-specific knowledge.
 
-## 5 — `5_renderer.patch` (render/, ~150 lines — visual only, zero physics)
+## `5_renderer.patch` (render/, ~150 lines — visual only, zero physics)
 
 Shaded-sphere rendering for coarse-grained particles (Lambert diffuse + Blinn
 specular + antialiased edge + soft halo) replacing flat circles — the molecular
 space-fill look. Plus an optional scene-label overlay (title + 3D-anchored
 annotations), currently unused by the scene.
 
-## 6 — `6_capture_plumbing.patch` (`main.rs`, ~26 lines)
+## `6_capture_plumbing.patch` (`main.rs`, ~26 lines)
 
 Headless capture mode now honors `--render-profile` and `-f` (force-visualization
 mode), so validated frame sequences can be rendered without the interactive window.
