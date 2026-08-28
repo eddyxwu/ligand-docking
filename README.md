@@ -17,8 +17,7 @@ Built as a scene in Lagra, a Rust physics engine.
 python3 generator/gen_ligand_docking_scene.py
 ```
 
-Downloads the crystal structure and builds the complete scene (146 particles,
-25 bonds) from scratch.
+Downloads the crystal structure and produces the JSON scene file (which atoms become which beads, the sugar's bond topology, the staged starting pose) that the engine ultimately simulates.
 
 ## What's here
 
