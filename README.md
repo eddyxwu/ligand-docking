@@ -1,4 +1,4 @@
-# ligand-docking
+# Ligand docking scene in a physics engine
 
 A coarse-grained simulation of lysozyme catching its sugar substrate. Both
 molecules come from a real crystal structure (PDB 1SFB) — the protein as one bead
