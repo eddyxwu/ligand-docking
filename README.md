@@ -1,11 +1,6 @@
 # Ligand docking scene in a physics engine
 
-A coarse-grained simulation of lysozyme catching its sugar substrate. Both
-molecules come from a real crystal structure (PDB 1SFB) — the protein as one bead
-per residue, the five-ring sugar (penta-NAG) as a flexible bonded chain. Pull the
-sugar out of the binding groove, let physics run, and it finds its way back to
-where the X-ray says it belongs. Nothing is scripted — the docking emerges from a
-Lennard-Jones potential and shape complementarity alone.
+"A coarse-grained simulation of lysozyme catching its sugar substrate. Both molecules come from a real crystal structure (PDB 1SFB), the protein as one bead per residue, the five-ring sugar (penta-NAG) as a flexible bonded chain. Pull the sugar out of the binding groove, let physics run, and it finds its way back to where the X-ray says it belongs. Nothing is scripted and the docking emerges from a Lennard-Jones potential."
 
 Video here: https://www.youtube.com/watch?v=kRHA0iAW7RY
 
